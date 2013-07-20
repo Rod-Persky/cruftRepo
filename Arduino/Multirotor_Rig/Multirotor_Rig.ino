@@ -9,11 +9,12 @@ Control is done though serial, using a set of single letter commands these are:
 
 To start the program:
 - s(tart): starts the program (or press a button attatched to the pin defined in the code)
-- ! : stops the control loop, the menu is still accessible
+- ! : stops the control loop, reloads the MRR settings
 
 For initially determining values for the motor controller:
 - c(onfigure): performs an automatic routine where the system aids in setting the ESC parameters (if motors continue to beep)
 - q(quit configuring): stops the configuration routine (if a wrong menu was selected)
+- g(raph): Export graph data in Meguinolink format
 
 Configuring the control loop requires a selection of axis and parameter:
 Axis,
@@ -72,7 +73,7 @@ Variables:
 */
 
 
-
+#include <avr/eeprom.h>
 #include <Servo.h>
 
 #define EnableSwitchPin 8
@@ -83,12 +84,6 @@ Variables:
 #define YawPot A1
 #define RollPot A2
 
-#define ESCuSOn 680
-#define ESCPropMin 860
-#define ESCPropMax 2000
-
-#define correctPitchMin 70
-
 #define Yaw 0
 #define Pitch 1
 #define Roll 2
@@ -96,81 +91,174 @@ Variables:
 Servo LeftMotor;
 Servo RightMotor;
 
-int currentvalue;         // raw data from sensors
-int pitch, yaw, roll;     // data from sensors (after any corrections)
-int dYaw, dPitch, dRoll;  // differential term
-int iYaw, iPitch, iRoll;  // integral term
-int micro_on, error;      // speed setting for motor controller
-boolean expectNumber, expectChannelMenu, systemEnabled = false;
+boolean expectNumber, expectChannelMenu, systemEnabled, enablePlot = false;
 
 //points to the parameter being modified
 unsigned int* paramPointer; //parameter data (for Kx, Setpoint, Windup)
 unsigned int channelPointer; //parameter channel (index for Kx, Setpoint, Windup)
 
-//hardcoded default values, the setup code will then overwrite this from flash, all are positive
-unsigned int Kp[3]       = {0,  7, 0};
-unsigned int Ki[3]       = {0,  0, 0};
-unsigned int Kd[3]       = {0, 50, 0};
-unsigned int Setpoint[3] = {0, 20, 0};
-unsigned int Windup[3]   = {2000, 2000, 2000};
+struct settings_t {
+  unsigned int Kp[3];
+  unsigned int Ki[3];
+  unsigned int KiDiv[3];
+  unsigned int Kd[3];
+  unsigned int Setpoint[3];
+  unsigned int Windup[3];
+  
+  unsigned int ESCuSOn;
+  unsigned int ESCPropMin;
+  unsigned int ESCPropMax;
+  
+  unsigned int correctPitchMin;
+  
+  unsigned int CheckEEPROM;
+} MRR; // MRR... Multirotor rig
+
+//factoryDefaults, aka - what's been tested already
+  unsigned int _Kp[3]       = {0,  7, 0};
+  unsigned int _Ki[3]       = {0,  0, 0};
+  unsigned int _KiDiv[3]    = {1, 100, 1}; //needs to be over 0
+  unsigned int _Kd[3]       = {0, 50, 0};
+  unsigned int _Setpoint[3] = {0, 20, 0};
+  unsigned int _Windup[3]   = {0, 100, 0};
+  
+  unsigned int _ESCuSOn    = 680;
+  unsigned int _ESCPropMin = 860;
+  unsigned int _ESCPropMax = 2000;
+  
+  unsigned int _correctPitchMin = 70;
+  
+  unsigned int _CheckEEPROM = 12345;
+
+
+void factoryDefaults() {
+  for(byte i=0; i<3; i++) {
+    MRR.Kp[i] = _Kp[i];
+    MRR.Ki[i] = _Ki[i];
+    MRR.KiDiv[i] = _KiDiv[i];
+    MRR.Kd[i] = _Kd[i];
+    MRR.Setpoint[i] = _Setpoint[i];
+    MRR.Windup[i]   = _Windup[i];
+  }
+        
+  MRR.ESCuSOn    = _ESCuSOn;
+  MRR.ESCPropMin = _ESCPropMin;
+  MRR.ESCPropMax = _ESCPropMax;
+  
+  MRR.correctPitchMin = _correctPitchMin;
+  MRR.CheckEEPROM = _CheckEEPROM;
+}
 
 
 void setup() {
-  //Setup pins
   pinMode(Pitch, INPUT);  
   pinMode(Yaw, INPUT);  
   pinMode(Roll, INPUT);
-  pinMode(StartButtonPin, INPUT);
+  pinMode(EnableSwitchPin, INPUT);
   pinMode(LeftMotorPin, OUTPUT);
   pinMode(RightMotorPin, OUTPUT);
   pinMode(StatusLEDPin, OUTPUT);
   
-  //The ESCs are servos with a range between ESCuSOn and ESCPropMax
-  LeftMotor.attach(LeftMotorPin, ESCuSOn, ESCPropMax);
-  RightMotor.attach(RightMotorPin, ESCuSOn, ESCPropMax);
-
-  //Get inital values for yaw and pitch
-  yaw = analogRead(Yaw);
-  pitch = (analogRead(Pitch) - correctPitchMin);
+  //Load custom settings from EEPROM
+  eeprom_read_block((void*)&MRR, (void*)0, sizeof(MRR));
+  if (!MRR.CheckEEPROM == _CheckEEPROM) factoryDefaults(); //check eeprom is initialised
   
+  //The ESCs are servos with a range between ESCuSOn and ESCPropMax
+  LeftMotor.attach(LeftMotorPin, MRR.ESCuSOn, MRR.ESCPropMax);
+  RightMotor.attach(RightMotorPin, MRR.ESCuSOn, MRR.ESCPropMax);
+
   //Start the serial communication... NOTE: the 115200 bits per seconds speed
   Serial.begin(115200);
+}
+
+
+void loop() {
+  //This loop keeps the system in a safe state (motors 'off')
+  LeftMotor.writeMicroseconds(0);
+  RightMotor.writeMicroseconds(0);
   
-  while(!(systemEnabled || digitalRead(StartButtonPin))) //if systemenabled or butten then move on
-  {
+  while(!(systemEnabled || digitalRead(EnableSwitchPin))) { //if systemenabled or butten then move on
     readSerial();
   }
   
-  
-  //startESC(11);
-  //startESC(12);
-  
-  /*
-  //Engage the ESCs and delay for 3 seconds
-  LeftMotor.writeMicroseconds(ESCuSOn);
-  RightMotor.writeMicroseconds(ESCuSOn);
-  delay(3000);*/
+  controlLoop();
+    
 }
 
+//Define the control loop constants
+void controlLoop() {
+  int currentvalue[3];
+  int error[3];
+  int proportional[3];
+  int integral[3] = {0, 0, 0};
+  int lastvalue[3];
+  int differential[3];
+  int power[3];     // speed setting for motor controller
+  
+  //Get inital values for yaw and pitch
+  lastvalue[Yaw] = analogRead(Yaw);
+  lastvalue[Pitch] = (analogRead(Pitch) - MRR.correctPitchMin);
+  lastvalue[Roll] = analogRead(Roll);
+  
+  while(systemEnabled){
+    // Get data, beware Pitch is a #def and pitch is the variable
+    currentvalue[Pitch] = analogRead(Pitch) - MRR.correctPitchMin;
+    currentvalue[Yaw]   = analogRead(Yaw);
+    currentvalue[Roll]  = analogRead(Roll);
+    
+    for(byte i = 0; i <3; i++) { // calculate PID terms for each axis
+      error[i]        = currentvalue[i] - MRR.Setpoint[i];
+      proportional[i] = error[i] * MRR.Kp[i];
+      integral[i]     = integral[i] + (error[i]/int(MRR.KiDiv)) * MRR.Ki[i];
+      differential[i] = (currentvalue[i] - lastvalue[i]) * MRR.Kd[i];
+      lastvalue[i]    = currentvalue[i];
+      
+      if (MRR.Windup[i] <= integral[i])       integral[i] = MRR.Windup[i]; else
+      if (integral[i] <= int(-MRR.Windup[i])) integral[i] = int(-MRR.Windup[i]);
+      
+      //power = proportional[i] + integral[i] + differential[i]
+      
+      // Ensure micro_on is within range, otherwise clamp to max or min
+      //if (MRR.ESCPropMax < power[i]) {power = MRR.ESCPropMax;}
+      //if (power[i] < MRR.ESCPropMin) {power = MRR.ESCPropMin;}
+    }
+    
+    sendPlotData("proportional", &proportional[Pitch]);
+    sendPlotData("integral",     &integral[Pitch]);
+    sendPlotData("differential", &differential[Pitch]);
+    sendPlotData("currentvalue", &currentvalue[Pitch]);
+    
+    /* Re-enable when rig becomes available to test with
+    LeftMotor.writeMicroseconds(micro_on - 150);
+    RightMotor.writeMicroseconds(micro_on);
+    */
+    
+    delay(50);
+    readSerial();
+    }
+}
 
-void sendPlotData(String series, int data) {
+void sendPlotData(String series, int* data) {
   //Send data to Meguinolink to monitor what's going on
-  Serial.print("{");
-  Serial.print(series);
-  Serial.print(",T,");
-  Serial.print(data);
-  Serial.println("}");
+  if (enablePlot) {
+    Serial.print("{");
+    Serial.print(series);
+    Serial.print(",T,");
+    Serial.print(*data);
+    Serial.println("}");
+  }
 }
+
 
 void startESC(unsigned int channel){
   //This function finds the ESC start command,
   // once found, you can hard code it. It should take
   // 100 seconds to complete this and the propellor may turn on
   // when/if this happens, turn the arduino or unplug the motor power.
-  for(unsigned int i=0; i<1000; i++){
+  for(int i=0; i<1000; i++){
     LeftMotor.writeMicroseconds(i);
     RightMotor.writeMicroseconds(i);
-    sendPlotData("Power", micro_on);
+    sendPlotData("Power", &i);
     delay(100);
   }
   
@@ -180,54 +268,6 @@ void startESC(unsigned int channel){
     LeftMotor.writeMicroseconds(0);
     RightMotor.writeMicroseconds(0);
     delay(1000);
-  }
-}
-
-//Define the control loop constants
-void loop() {
-  
-  // Get data, beware Pitch is a #def and pitch is the variable
-  currentvalue = analogRead(Pitch) - correctPitchMin;
-  dPitch = currentvalue - pitch;
-  pitch = currentvalue;
-
-  currentvalue = analogRead(Yaw);
-  dYaw = currentvalue - yaw;
-  yaw = currentvalue;
-  
-  currentvalue = analogRead(Roll);
-  dRoll = currentvalue - roll;
-  roll = currentvalue;
-  
-  
-  // Calculate new output
-  //Note: rising physical pitch causes a drop in pitch value
-  error = pitch - Setpoint[Pitch];
-  iPitch = iPitch + Ki[Pitch] * error;
-  micro_on = ESCPropMin + Kp[Pitch] * (pitch - Setpoint[Pitch]) + Kd[Pitch] * dPitch + iPitch; 
-  sendPlotData("Power", micro_on);
-  sendPlotData("kPitch", Kp[Pitch] * error);
-  sendPlotData("dPitch", Kd[Pitch] * dPitch);
-  sendPlotData("iPitch", iPitch);
-
- // Ensure micro_on is within range, otherwise clamp to max or min
- if (ESCPropMax < micro_on){micro_on = ESCPropMax;}
- if (micro_on < ESCPropMin) {micro_on = ESCPropMin;}
-
-/* Re-enable when rig becomes available to test with
- // Operate the motors
- LeftMotor.writeMicroseconds(micro_on - 150);
- RightMotor.writeMicroseconds(micro_on);
-
- delay(50);
- */
-  Serial.println("working");
-  readSerial();
-  delay(1000);
- 
-  while(!(systemEnabled || digitalRead(StartButtonPin))) // if systemenabled or butten then keep working
-  {
-    readSerial();
   }
 }
 
@@ -270,32 +310,32 @@ boolean readSerial()
       switch (inByte) {
         case 'p': //proportional
           Serial.print(F(" Kp = "));
-          Serial.print(Kp[channelPointer]);
-          paramPointer = &Kp[channelPointer];
+          Serial.print(MRR.Kp[channelPointer]);
+          paramPointer = &MRR.Kp[channelPointer];
           break;
           
         case 'd': //derivitive
           Serial.print(F(" Kd = "));
-          Serial.print(Kd[channelPointer]);
-          paramPointer = &Kd[channelPointer];
+          Serial.print(MRR.Kd[channelPointer]);
+          paramPointer = &MRR.Kd[channelPointer];
           break;
           
         case 'i': //integral
           Serial.print(F(" Ki = "));
-          Serial.print(Ki[channelPointer]);
-          paramPointer = &Ki[channelPointer];
+          Serial.print(MRR.Ki[channelPointer]);
+          paramPointer = &MRR.Ki[channelPointer];
           break;
           
         case 'w': //windup
           Serial.print(F(" Windup = "));
-          Serial.print(Windup[channelPointer]);
-          paramPointer = &Windup[channelPointer];
+          Serial.print(MRR.Windup[channelPointer]);
+          paramPointer = &MRR.Windup[channelPointer];
           break;
           
         case 'z': //setpoint
           Serial.print(F(" Setpoint = "));
-          Serial.print(Setpoint[channelPointer]);
-          paramPointer = &Setpoint[channelPointer];
+          Serial.print(MRR.Setpoint[channelPointer]);
+          paramPointer = &MRR.Setpoint[channelPointer];
           break;
           
         default:
@@ -305,7 +345,7 @@ boolean readSerial()
             return false;  // Reject commands until a parameter is selected
           }
           else
-            Serial.println("Exiting menu");
+            Serial.println(" Exiting menu");
             expectChannelMenu = false;
             Serial.read();
             return true;
@@ -321,13 +361,21 @@ boolean readSerial()
     
     switch (inByte) {
       case 's': //start
-        Serial.println(F("Start"));
-        systemEnabled = true;
+        systemEnabled = !systemEnabled;
+        if (systemEnabled) Serial.println(F("Start"));
+        else Serial.println(F("Stop"));
         break;
         
       case '!': //restart
         Serial.println(F("Restart"));
-        systemEnabled = false;
+        systemEnabled = false; //stop control loop
+        eeprom_read_block((void*)&MRR, (void*)0, sizeof(MRR)); // reload custom settings
+        break;
+        
+      case 240: //Meguinolink connect
+        Serial.println(F("Meguinolink connect"));
+        systemEnabled = false; //stop control loop
+        enablePlot = true;
         break;
         
       case 'c':  //configure
@@ -354,20 +402,31 @@ boolean readSerial()
         Serial.print(F("Pitch"));
         channelPointer = Pitch;
         expectChannelMenu = true;
-        break;       
+        break;
+        
+     case 'g': //graph
+        Serial.print(F("Graph"));
+        enablePlot = !enablePlot;
+        if (enablePlot) Serial.println(F(" Enabled"));
+        else Serial.println(F(" Disabled"));
+        break;  
        
       case 'k': //keep
         Serial.println(F("Keep"));
+        eeprom_write_block((const void*)&MRR, (void*)0, sizeof(MRR));
         break;
         
       case 'f': //factory
         Serial.println(F("Factory"));
+        factoryDefaults();
         break;
         
       default: //if none of the prior cases are the inByte
           Serial.print(F("Check command syntax for "));
           Serial.write(inByte);
-          Serial.println();
+          Serial.print(" (");
+          Serial.print(inByte);
+          Serial.println(")");
     } //end switch case
     
     Serial.read(); //consume character
