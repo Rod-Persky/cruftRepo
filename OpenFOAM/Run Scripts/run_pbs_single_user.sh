@@ -38,9 +38,9 @@ echo "Load openfoam" && source $PBS_O_HOME/OpenFOAM/OpenFOAM-2.2.2/etc/bashrc
 
 # If testing in local session
 if [ -z "${PBS_O_HOME+xxx}" -o -z "${PBS_O_WORKDIR+xxx}" ]; then
-   echo "Running on a local machine (PBS variables not set)"
-   export PBS_O_HOME=$HOME
-   export PBS_O_WORKDIR=`pwd`
+    echo "Running on a local machine (PBS variables not set)"
+    export PBS_O_HOME=$HOME
+    export PBS_O_WORKDIR=`pwd`
 fi
 
 # Change to our working directory

@@ -15,20 +15,30 @@ function cleanCase {
 
 function setupRun {
     blockMesh
-	setFields
-	addSwirlAndRotation
+    setFields
+    addSwirlAndRotation
 }
 
 function runParallel {
     echo "Running in parallel"
-	echo "Got MPIRUN = $mpirun"
-	setupRun
-	decomposePar
+    echo "Got MPIRUN = $mpirun"
+    setupRun
+    decomposePar
     $mpirun buoyantPimpleFoam -parallel
 }
 
 function runSingle {
     echo "Running Single Threaded"
     setupRun
-	buoyantPimpleFoam
+    buoyantPimpleFoam
 }
+
+function postProcessing {
+    cd postProcessing
+    sample -case .. -latestTime
+    cd ..
+}
+
+# Lets, by default, run the single case.
+cleanCase
+runSingle

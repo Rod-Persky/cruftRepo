@@ -39,14 +39,14 @@ echo "Load OpenFOAM" && module load openfoam
 mpirun=/pkg/suse11/openmpi/1.6.5/bin/mpirun
 
 if [ -z "${PBS_O_HOME+xxx}" -o -z "${PBS_O_WORKDIR+xxx}" ]; then
-   echo "Running on a local machine (PBS variables not set)"
-   export PBS_O_HOME=$HOME
-   export PBS_O_WORKDIR=`pwd`
-   export _NCPU=4
+    echo "Running on a local machine (PBS variables not set)"
+    export PBS_O_HOME=$HOME
+    export PBS_O_WORKDIR=`pwd`
+    export _NCPU=4
 else
-   echo "Running on PBS"
-   export _NCPU=`sed -n '$=' $PBS_NODEFILE`
-   mpirun="$mpirun --hostfile $PBS_NODEFILE -np $_NCPU"
+    echo "Running on PBS"
+    export _NCPU=`sed -n '$=' $PBS_NODEFILE`
+    mpirun="$mpirun --hostfile $PBS_NODEFILE -np $_NCPU"
 fi
 
 echo "Job has access to `nproc` threads per node, and will use $_NCPU"
