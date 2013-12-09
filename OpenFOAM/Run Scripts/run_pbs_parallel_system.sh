@@ -82,7 +82,6 @@ method             scotch;" > system/decomposeParDict
 # Run Case
 echo "Running Case"
 echo "Load Case Functions" && source case_functions.sh
-cleanCase
 runParallel
 
 # Get runtime
