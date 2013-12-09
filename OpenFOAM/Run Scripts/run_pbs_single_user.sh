@@ -51,7 +51,7 @@ START=$(date +%s)
 
 # Run Case
 echo "Running Case"
-echo "Load Case Functions" && source caseFunctions.sh
+echo "Load Case Functions" && source case_functions.sh
 cleanCase
 runSingle
 
