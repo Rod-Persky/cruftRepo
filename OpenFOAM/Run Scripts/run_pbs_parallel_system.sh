@@ -43,6 +43,7 @@ if [ -z "${PBS_O_HOME+xxx}" -o -z "${PBS_O_WORKDIR+xxx}" ]; then
     export PBS_O_HOME=$HOME
     export PBS_O_WORKDIR=`pwd`
     export _NCPU=4
+    mpirun="$mpirun -np $_NCPU"
 else
     echo "Running on PBS"
     export _NCPU=`sed -n '$=' $PBS_NODEFILE`
@@ -80,7 +81,7 @@ method             scotch;" > system/decomposeParDict
 
 # Run Case
 echo "Running Case"
-echo "Load Case Functions" && source caseFunctions.sh
+echo "Load Case Functions" && source case_functions.sh
 cleanCase
 runParallel
 
