@@ -22,8 +22,11 @@ function setupRun {
 function runParallel {
     echo "Running in parallel"
     echo "Got MPIRUN = $mpirun"
-    setupRun
-    decomposePar
+#   You need to setup the run on a single
+#   node! Will update the script to run in
+#   this manner
+#    setupRun
+#    decomposePar
     $mpirun buoyantPimpleFoam -parallel
 }
 
