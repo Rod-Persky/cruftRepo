@@ -1,0 +1,31 @@
+#!/bin/bash -l
+#PBS -N prolog
+#PBS -l nodes=1:ppn=1
+#PBS -l mem=200mb
+#PBS -l walltime=00:02:00
+#PBS -j oe
+#PBS -o logs/pbs.prolog
+
+# Prolog,
+#  This script is the first to run, it:
+#  - Sets up the Geometry
+#  - Creates the initial mesh
+#  - Adds initial fields
+#
+# These functions are intended to be general to the whole case,
+# such that no editing is nessesary in this file
+
+# Load functions and variables
+cd $PBS_O_WORKDIR
+blockMeshDict="constant/polyMesh/blockMeshDict"
+_script=$PBS_O_WORKDIR/../_scripts
+. $_script/runCase
+loadOF
+
+
+# Start Processing,
+echo "Running M4"
+m4 -P "$blockMeshDict.m4" > $blockMeshDict
+runApplication blockMesh
+cp -r 0_orig 0
+runApplication addSwirlAndRotation

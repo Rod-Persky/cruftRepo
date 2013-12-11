@@ -1,0 +1,35 @@
+#!/bin/bash -l
+#PBS -N runCFD
+#PBS -l nodes=1:ppn=1
+#PBS -l mem=5000mb
+#PBS -l walltime=05:00:00
+#PBS -j oe
+#PBS -o logs/pbs.runCFD
+
+# runCFD,
+#  This script:
+#  - Figures out what application is being used
+#  - If its running ST or MT
+#  - Sets it going
+#
+#  This script should probably keep a look out on how time is progressing and
+#  stop the run before it gets dumped by PBS
+
+
+cd $PBS_O_WORKDIR
+_script=../_scripts
+. $_script/runCase
+mpirun=/pkg/suse11/openmpi/1.6.5/bin/mpirun
+loadOF
+application=$(sed -ne 's/^application *\(.*\);/\1/p' system/controlDict)
+
+
+if [ -e system/decomposeParDict ]; then
+    _NCPU=$(sed -ne 's/^numberOfSubdomains *\(.*\);/\1/p' system/decomposeParDict)
+    mpirun="$mpirun --hostfile $PBS_NODEFILE -np $_NCPU"
+    echo "Will now run $mpirun $application -parallel"
+
+    $mpirun $application -parallel > logs/log.$application 2>&1
+else
+    runApplication $application
+fi

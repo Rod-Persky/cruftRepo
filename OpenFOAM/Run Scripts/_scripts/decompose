@@ -1,0 +1,42 @@
+#!/bin/bash -l
+#PBS -N decompose
+#PBS -l nodes=1:ppn=1
+#PBS -l mem=5000mb
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -o logs/pbs.decompose
+
+# Decompose,
+#  This script:
+#  - Sets up the decomposition, and
+#  - Runs the decomposition.
+#
+#  To setup the decomposition it's expected that setup nxm will be sent where
+#  n is the cpus per machine and m is number of machines.
+
+cd $PBS_O_WORKDIR
+_script=../_scripts
+. $_script/runCase
+
+function setup {
+    # Isolate NxM, cut each out, multiply, copy decompose and replace
+    _NXM=$(echo $1 | grep -o "[0-9]*x[0-9]*")
+    N=$(echo $_NXM | cut -d'x' -f1)
+    M=$(echo $_NXM | cut -d'x' -f2)
+    _NCPU=$(( $N*$M ))
+    echo "setting up for $_NCPU CPUs ($N cores over $M node/s)"
+    cp $_script/decomposeParDict system
+    sed -i "s/OfSubdomains/OfSubdomains $_NCPU/" system/decomposeParDict
+    sed -i "s/\#PBS -l nodes=1:ppn=1/\#PBS -l nodes=$M:ppn=$N/" .runCFD
+
+}
+
+function runDecompose {
+    loadOF
+    runApplication decomposePar -force
+}
+
+case $1 in
+    setup) setup $2;;
+    *) runDecompose;;
+esac
